@@ -1,7 +1,7 @@
 /* pine-engine.js
    English translation of the header below:
-   A practical-subset rendering engine for PineScript (TradingView) v5/v6 "indicator" scripts
-   (v3/v4 and earlier are also partially supported). It is structured as: lexer -> parser (AST) ->
+   A practical-subset rendering engine for PineScript (TradingView) "indicator" scripts
+   It is structured as: lexer -> parser (AST) ->
    an interpreter that re-runs the script from scratch for every bar.
 
    The supported range and known limitations (request.security limits, method-overloading limits,
@@ -17,7 +17,7 @@
    declared with var carry their value over from the previous bar (persist); ordinary '=' variables
    are recomputed fresh every bar.
 
-   PineScript(TradingView) v5/v6(v3/v4 및 이하 버전도 부분지원) "지표(indicator)" 스크립트의 실용적 서브셋 렌더링 엔진.
+   PineScript(TradingView) "지표(indicator)" 스크립트의 실용적 서브셋 렌더링 엔진.
    렉서 -> 파서(AST) -> 봉(bar) 단위로 스크립트를 처음부터 다시 실행하는 인터프리터, 순서로 구성된다.
 
    지원 범위와 알려진 제약(request.security 한계, method 오버로딩 한계 등)은 계속 늘어나서 여기
@@ -443,7 +443,7 @@ class PineParser {
     }
     // 'method' is not a reserved word — it's a soft keyword recognized only from context (the same
     // way 'switch' is). The actual parsing is identical to a regular function declaration; the
-    // only difference is a marker saying it can later also be invoked via dot (.) call syntax.
+    // only difference is a marker saying it can later also be invoked via dot(.) call syntax.
     // 'method'는 예약어가 아니라 문맥으로만 판단하는 소프트 키워드(switch와 같은 방식) —
     // 실제 파싱은 일반 함수 선언과 동일하고, 나중에 점(.) 호출로도 쓸 수 있다는 표시만 다르다.
     if(this.at('IDENT', 'method') && this.peek(1).type === 'IDENT'){
