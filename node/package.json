@@ -1,9 +1,0 @@
-{
-  "name": "openpine",
-  "version": "0.1.0",
-  "description": "A practical subset of TradingView Pine Script — pure JS lexer/parser/interpreter (Node build)",
-  "main": "index.js",
-  "files": ["index.js", "../core"],
-  "engines": { "node": ">=12" },
-  "license": "MIT"
-}
