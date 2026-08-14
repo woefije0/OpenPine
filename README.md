@@ -14,6 +14,9 @@ it hands back plain data structures.
 It ships as two independent builds that share one copy of the core logic: a
 CommonJS build for Node.js, and a `<script>`-tag build for the browser.
 
+For the exact supported Pine Script subset, known limitations, and the
+execution model, see [`PINE_ENGINE.md`](PINE_ENGINE.md).
+
 ## Layout
 
 ```
@@ -105,24 +108,35 @@ synchronous — no network or I/O ever happens inside the engine itself.
   `{ [callId]: value }` (e.g. values the user changed in a settings panel).
 - `options.strategyPropsOverride` — overrides for a `strategy()` script's
   properties (commission, slippage, etc).
-- `options.lowerTfCache` — a `Map<timeframe string, bars[]>` that
-  `request.security_lower_tf()` calls, and `request.security()` calls whose
-  timeframe is *not* an exact multiple of the chart's own resolution, read
-  from. Fill it with whatever atomic resolution you actually have data for
-  (e.g. just `"1S"` for 1-second bars) — you do not need to key it by the
-  exact timeframe the script asks for. If the interpreter doesn't find an
-  exact key match, it looks for any entry in the cache whose timeframe
-  evenly divides the requested one and synthesizes the requested resolution
-  from it on the fly (`PineInterpreter.resolveLowerTfBars` — if there are
-  multiple valid divisor candidates, it picks the coarsest one to minimize
-  aggregation work). This means you never have to scan the script in
-  advance to know exactly which timeframes it will ask for. If you don't
-  provide this option, or the cache has nothing relevant,
-  `request.security_lower_tf()` returns `na` and a mismatched
-  `request.security()` returns `na` as well. A `request.security()` call
-  whose timeframe *is* an exact multiple of the chart's resolution (e.g.
-  asking for `"5"` on a 1-minute chart) is synthesized correctly straight
-  from the main bars with no cache needed at all.
+- `options.lowerTfCache` — a `Map<key, bars[]>` that `request.security_lower_tf()`
+  calls, and `request.security()` calls whose timeframe is *not* an exact
+  multiple of the chart's own resolution, read from.
+  - **Same symbol** (the overwhelmingly common case — passing `syminfo.tickerid`,
+    or omitting the symbol argument): key by whatever atomic resolution you
+    actually have data for (e.g. just `"1S"` for 1-second bars) — you do not
+    need to key it by the exact timeframe the script asks for. If the
+    interpreter doesn't find an exact key match, it looks for any entry in
+    the cache whose timeframe evenly divides the requested one and
+    synthesizes the requested resolution from it on the fly
+    (`PineInterpreter.resolveLowerTfBars` — if there are multiple valid
+    divisor candidates, it picks the coarsest one to minimize aggregation
+    work). A `request.security()` call whose timeframe *is* an exact
+    multiple of the chart's resolution (e.g. asking for `"5"` on a 1-minute
+    chart) is synthesized correctly straight from the main bars with no
+    cache needed at all.
+  - **A different symbol** (any other string): key with
+    `OpenPine.securityCacheKey(symbol, timeframe)` instead of a plain
+    timeframe string. The same divisor-based synthesis applies, but only
+    ever within that symbol's own entries — a request for another symbol is
+    never served from this chart's own bars or cache, even as a fallback,
+    since that would silently return the wrong symbol's prices under the
+    requested symbol's name. One exception: a different symbol requested at
+    `timeframe.period` (empty timeframe, meaning "same resolution as this
+    chart") isn't supported and always returns `na` — there's no timeframe
+    string to align cache entries by in that case.
+  - If you don't provide this option, or the cache has nothing relevant for
+    the request, `request.security_lower_tf()` returns `na` and a
+    mismatched `request.security()` returns `na` as well.
 
 Return value:
 
@@ -135,6 +149,11 @@ Return value:
 script's result additionally includes its trade history / equity curve,
 etc. Runtime errors are thrown as a plain object shaped like
 `{ pineError: true, line, message }` (not an `Error` subclass).
+
+**`OpenPine.securityCacheKey(symbol, timeframe)`** — builds the
+`lowerTfCache` key for a different symbol's data at a given timeframe (see
+`options.lowerTfCache` above). Same-symbol entries keep using a plain
+timeframe string, unchanged.
 
 **`OpenPine.aggregateCandles(bars, ms)`** — a general-purpose OHLCV
 aggregator that buckets bars into a fixed millisecond interval. This is the
@@ -177,6 +196,17 @@ const result = OpenPine.run(source, bars, { lowerTfCache });
 // Neither one needs a "5S" or "15" key placed directly into lowerTfCache.
 ```
 
+A different symbol works the same way, just keyed with `securityCacheKey`:
+
+```js
+const rawEth1s = await myApi.fetchCandles('ETHUSD.P', '1s', fromSec, toSec);
+lowerTfCache.set(OpenPine.securityCacheKey('ETHUSD.P', '1S'), rawEth1s);
+
+const result = OpenPine.run(source, bars, { lowerTfCache });
+// request.security("ETHUSD.P", "5", close) -> synthesized from ETH's own 1S entries only,
+// never from this chart's own bars (even as a multiple-of-chart-resolution fallback).
+```
+
 ## Design notes
 
 - `OpenPine.run()` never does any fetching or I/O on its own. Anything that
@@ -195,12 +225,25 @@ const result = OpenPine.run(source, bars, { lowerTfCache });
   you — a second, a minute, anything — sub-minute timeframes (`"1S"`,
   `"5S"`, etc) are supported the same way coarser ones are, with no
   special-casing.
+- Because fetching is entirely the host's job, `request.security()` /
+  `request.security_lower_tf()` can serve a genuinely different symbol too
+  (not just a different timeframe of the current one) — something the
+  charting app this engine was originally built for never allowed, since it
+  only ever loaded one symbol's bars at a time. The interpreter never
+  guesses here: a request for another symbol is only ever answered from
+  `lowerTfCache` entries keyed for that exact symbol (`securityCacheKey`) —
+  it will never fall back to bucketing this chart's own bars, which would
+  silently mislabel this symbol's prices as the requested one's.
 
 ## Real-world usage example
 
 You can see this engine embedded in a real charting application at
 [github.com/woefije0/hl-chart](https://github.com/woefije0/hl-chart), and
 try it live at [woefije0.github.io/hl-chart](https://woefije0.github.io/hl-chart/).
+
+## License
+
+[MIT](LICENSE)
 
 ---
 
@@ -216,6 +259,9 @@ plot/line/box/label/table 출력을 만들어내고, `strategy()` 스크립트�
 
 핵심 로직 한 벌을 공유하는 독립된 두 가지 빌드로 제공된다: Node.js용
 CommonJS 빌드와, 브라우저용 `<script>` 태그 빌드.
+
+정확히 어떤 Pine Script 서브셋을 지원하는지, 알려진 제약, 실행 모델은
+[`PINE_ENGINE.md`](PINE_ENGINE.md) 참고.
 
 ### 구조
 
@@ -308,18 +354,29 @@ npx http-server .
   슬리피지 등) 오버라이드.
 - `options.lowerTfCache` — `request.security_lower_tf()` 호출과, 차트 자체
   해상도의 정확한 배수가 *아닌* timeframe을 요청하는 `request.security()`
-  호출이 참조하는 `Map<timeframe 문자열, bars[]>`. 실제로 가진 아무 원자
-  해상도로나 채워 넣으면 된다(예: 1초봉이면 그냥 `"1S"` 하나만) — 스크립트가
-  요청하는 정확한 timeframe으로 키를 넣을 필요는 없다. 인터프리터가 정확히
-  일치하는 키를 못 찾으면, 캐시 안에서 요청 timeframe을 정확히
-  나누어떨어지게 하는(즉 그 timeframe의 약수인) 항목을 찾아 즉석에서 그
-  해상도로 합성한다(`PineInterpreter.resolveLowerTfBars` — 약수 후보가
-  여럿이면 합성량이 가장 적은 가장 굵은 것을 고른다). 그래서 스크립트를 미리
-  스캔해서 정확히 어떤 timeframe들을 요청할지 알아낼 필요가 없다. 이 옵션을
-  안 주거나 캐시에 관련 데이터가 없으면 `request.security_lower_tf()`는
-  `na`를, 배수가 아닌 `request.security()`도 `na`를 돌려준다. 반대로 차트
-  해상도의 정확한 배수를 요청하는 `request.security()`(예: 1분봉 차트에서
-  `"5"` 요청)는 캐시가 전혀 없어도 메인 봉을 그대로 묶어 정확하게 합성된다.
+  호출이 참조하는 `Map<key, bars[]>`.
+  - **같은 심볼** (압도적으로 흔한 경우 — `syminfo.tickerid`를 넘기거나
+    symbol 인자를 생략): 실제로 가진 아무 원자 해상도로나 채워 넣으면
+    된다(예: 1초봉이면 그냥 `"1S"` 하나만) — 스크립트가 요청하는 정확한
+    timeframe으로 키를 넣을 필요는 없다. 인터프리터가 정확히 일치하는 키를
+    못 찾으면, 캐시 안에서 요청 timeframe을 정확히 나누어떨어지게 하는(즉
+    그 timeframe의 약수인) 항목을 찾아 즉석에서 그 해상도로 합성한다
+    (`PineInterpreter.resolveLowerTfBars` — 약수 후보가 여럿이면 합성량이
+    가장 적은 가장 굵은 것을 고른다). 차트 해상도의 정확한 배수를 요청하는
+    `request.security()`(예: 1분봉 차트에서 `"5"` 요청)는 캐시가 전혀
+    없어도 메인 봉을 그대로 묶어 정확하게 합성된다.
+  - **다른 심볼** (그 외 아무 문자열): 평범한 timeframe 문자열 대신
+    `OpenPine.securityCacheKey(symbol, timeframe)`로 키를 만든다. 같은
+    약수 기반 합성이 적용되지만, 그 심볼 자신의 항목 안에서만 이루어진다 —
+    다른 심볼 요청은 이 차트 자신의 봉이나 캐시로는 폴백으로도 절대
+    서빙되지 않는다(그러면 조용히 엉뚱한 심볼의 가격을 요청한 심볼 이름으로
+    돌려주게 되기 때문). 예외 하나: `timeframe.period`(빈 timeframe, "이
+    차트와 같은 해상도"라는 뜻)로 다른 심볼을 요청하는 건 지원하지 않고
+    항상 `na`를 돌려준다 — 이 경우엔 캐시 항목을 맞춰볼 timeframe
+    문자열이 아예 없다.
+  - 이 옵션을 안 주거나 요청과 관련된 데이터가 캐시에 없으면
+    `request.security_lower_tf()`는 `na`를, 배수가 아닌
+    `request.security()`도 `na`를 돌려준다.
 
 반환값:
 
@@ -331,6 +388,11 @@ npx http-server .
 (Map 타입 필드들은 콜사이트 key → 값 배열). `strategy()` 스크립트면 거래
 내역/자산곡선 등도 추가로 포함된다. 런타임 에러는 `Error`의 서브클래스가
 아니라 `{ pineError: true, line, message }` 형태의 일반 객체로 던져진다.
+
+**`OpenPine.securityCacheKey(symbol, timeframe)`** — 다른 심볼의 봉을 특정
+timeframe으로 `lowerTfCache`에 넣을 때 쓰는 키를 만든다(위
+`options.lowerTfCache` 설명 참고). 같은 심볼용 항목은 그대로 평범한
+timeframe 문자열을 쓴다.
 
 **`OpenPine.aggregateCandles(bars, ms)`** — 고정 밀리초 간격으로 봉을 합치는
 범용 OHLCV 집계기. `resolveLowerTfBars`가 내부적으로 쓰는 것과 같은 함수라
@@ -368,6 +430,17 @@ const result = OpenPine.run(source, bars, { lowerTfCache });
 // 둘 다 lowerTfCache에 "5S"나 "15" 키를 직접 넣을 필요가 없다.
 ```
 
+다른 심볼도 방식은 같다, `securityCacheKey`로 키만 다르게 만들면 된다:
+
+```js
+const rawEth1s = await myApi.fetchCandles('ETHUSD.P', '1s', fromSec, toSec);
+lowerTfCache.set(OpenPine.securityCacheKey('ETHUSD.P', '1S'), rawEth1s);
+
+const result = OpenPine.run(source, bars, { lowerTfCache });
+// request.security("ETHUSD.P", "5", close) -> ETH 자신의 1S 항목에서만 합성됨,
+// 이 차트 자신의 봉으로는(배수 폴백으로도) 절대 대체되지 않는다.
+```
+
 ### 설계 메모
 
 - `OpenPine.run()`은 그 자체로는 어떤 fetch나 I/O도 하지 않는다. 외부
@@ -384,6 +457,13 @@ const result = OpenPine.run(source, bars, { lowerTfCache });
   합성한다. 즉 어떤 원자 해상도를 공급할지는 전적으로 호스트 마음이다 —
   1초든 1분이든 뭐든 상관없고, 초 단위 timeframe(`"1S"`, `"5S"` 등)도 더
   굵은 timeframe과 똑같은 방식으로 특별 취급 없이 지원된다.
+- fetch가 전적으로 호스트 몫이라, `request.security()`/`request.security_lower_tf()`가
+  (현재 심볼의 다른 timeframe뿐 아니라) 진짜 다른 심볼도 서빙할 수 있다 —
+  이 엔진이 원래 붙어 있던 차트 앱은 한 번에 심볼 하나만 로드해서 애초에
+  불가능했던 것이다. 인터프리터는 여기서 절대 추측하지 않는다 — 다른 심볼
+  요청은 오직 그 심볼로 키가 잡힌(`securityCacheKey`) `lowerTfCache` 항목
+  으로만 응답되고, 이 차트 자신의 봉을 묶는 폴백으로는 절대 안 넘어간다
+  (그러면 이 심볼의 가격을 요청한 심볼 이름으로 조용히 잘못 붙이게 된다).
 
 ### 실제 활용 예시
 
@@ -391,3 +471,7 @@ const result = OpenPine.run(source, bars, { lowerTfCache });
 [github.com/woefije0/hl-chart](https://github.com/woefije0/hl-chart)에서
 볼 수 있고, [woefije0.github.io/hl-chart](https://woefije0.github.io/hl-chart/)에서
 직접 써볼 수 있다.
+
+### 라이선스
+
+[MIT](LICENSE)
