@@ -1,0 +1,10 @@
+{
+  "name": "openpine",
+  "version": "0.1.0",
+  "description": "TradingView Pine Script v5/v6 subset — pure JS lexer/parser/interpreter (Node build)",
+  "main": "index.js",
+  "files": ["index.js", "../core"],
+  "engines": { "node": ">=12" },
+  "license": "UNLICENSED",
+  "private": true
+}
