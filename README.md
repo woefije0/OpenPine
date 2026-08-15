@@ -167,10 +167,27 @@ need to call it yourself — but it's available if you want to pre-aggregate
 **`OpenPine.setLocale('ko' | 'en')`** — language for error messages.
 Defaults to `'ko'`.
 
-**`OpenPine.setSymbol({ coin, isSpot })`** — the current symbol that
-`syminfo.*` built-ins refer to. If you never call this, the symbol is
-treated as empty (calculations still run fine — `syminfo.ticker` etc just
-come back as an empty string).
+**`OpenPine.setSymbol({ coin, isSpot, exchangePrefix })`** — the current
+symbol that `syminfo.*` built-ins refer to. `exchangePrefix` (default `''`)
+feeds `syminfo.prefix` and the `"EXCHANGE:"` part of `syminfo.tickerid`
+(e.g. `exchangePrefix: 'BINANCE'` makes `syminfo.tickerid` come out as
+`"BINANCE:BTCUSD.P"`; leaving it unset drops the prefix entirely). If you
+never call this, the symbol is treated as empty (calculations still run
+fine — `syminfo.ticker` etc just come back as an empty string).
+
+**`OpenPine.setMintickResolver(fn)`** — overrides the `syminfo.mintick` /
+`minmove` / `pricescale` heuristic for a specific symbol.
+`fn: (symbol: string) => number | null | undefined`. `symbol` is this
+chart's own `syminfo.ticker`/`tickerid` while evaluating normally, or the
+exact string a script passed as `request.security()`'s `symbol` argument
+while evaluating that call's expression for a different symbol — so a
+resolver naturally gets asked about whichever symbol is actually "in scope"
+at the time, current chart or otherwise. Return a positive number to use as
+the tick size; return `null`/`undefined` (or don't call this at all) to fall
+back to a built-in 5-significant-figure approximation of the tick, derived
+from whatever price is currently in view — a reasonable guess for exchanges
+that actually follow that convention, but only ever a guess for symbols
+this engine has no real tick data for.
 
 Lower-level exports — `PineInterpreter`, `PineParser`, `PineTypeInferrer`,
 `PineArray`, `tokenize`, and a few others — are also exported, for cases
@@ -404,9 +421,25 @@ timeframe 문자열을 쓴다.
 
 **`OpenPine.setLocale('ko' | 'en')`** — 에러 메시지 언어. 기본값 `'ko'`.
 
-**`OpenPine.setSymbol({ coin, isSpot })`** — `syminfo.*` 내장 변수가 참조할
-현재 심볼. 한 번도 안 부르면 빈 심볼로 취급한다(계산 자체는 문제없이
-돌아가고, `syminfo.ticker` 등이 그냥 빈 문자열로 나올 뿐이다).
+**`OpenPine.setSymbol({ coin, isSpot, exchangePrefix })`** — `syminfo.*`
+내장 변수가 참조할 현재 심볼. `exchangePrefix`(기본값 `''`)는
+`syminfo.prefix`와 `syminfo.tickerid`의 `"거래소:"` 부분에 쓰인다(예:
+`exchangePrefix: 'BINANCE'`면 `syminfo.tickerid`가 `"BINANCE:BTCUSD.P"`로
+나온다 — 안 정하면 접두사 없이 나온다). 한 번도 안 부르면 빈 심볼로
+취급한다(계산 자체는 문제없이 돌아가고, `syminfo.ticker` 등이 그냥 빈
+문자열로 나올 뿐이다).
+
+**`OpenPine.setMintickResolver(fn)`** — `syminfo.mintick`/`minmove`/
+`pricescale` 근사를 특정 심볼에 대해 대체한다.
+`fn: (symbol: string) => number | null | undefined`. `symbol`은 평소엔 이
+차트 자신의 `syminfo.ticker`/`tickerid`이고, `request.security()`가 다른
+심볼의 식을 평가하는 동안엔 스크립트가 그 호출의 `symbol` 인자로 넘긴
+문자열 그대로다 — 그래서 리졸버는 그 시점에 실제로 "활성 상태인" 심볼이
+뭐든(현재 차트든 다른 심볼이든) 그것에 대해 자연스럽게 질의받는다. 양수를
+돌려주면 틱 사이즈로 쓰고, `null`/`undefined`를 돌려주거나(아예 이 함수를
+안 부르거나) 하면 지금 보이는 가격에서 유효숫자 5자리 근사로 폴백한다 —
+실제로 그 관례를 따르는 거래소면 꽤 그럴듯한 추측이지만, 이 엔진이 진짜
+틱 정보를 모르는 심볼이면 그냥 추측일 뿐이다.
 
 저수준 API: `PineInterpreter`, `PineParser`, `PineTypeInferrer`,
 `PineArray`, `tokenize` 등도 내보낸다 — 예를 들어 매 틱마다 스크립트 전체를
