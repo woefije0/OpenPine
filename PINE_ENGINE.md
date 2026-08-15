@@ -80,15 +80,20 @@ itself. See the `method` overloading section below for the exact rules and remai
 
 - **`syminfo.*`** — returns a real value for whatever the host actually told the engine (via
   `PineHost`/`setSymbol()`); everything else falls back to its own name as a string.
-  - `syminfo.mintick`/`minmove`/`pricescale` — an approximate tick derived by applying a fixed
-    5-significant-figure rule (matching Hyperliquid's convention — the same rule
-    `pine-strategy.js`'s slippage calculation uses) to the current bar's close. This is a fixed
-    heuristic, not configurable per host, and doesn't account for any symbol-specific tick-size
-    metadata (a real exchange's actual minimum tick can differ from this approximation).
+  - `syminfo.mintick`/`minmove`/`pricescale` — by default, an approximate tick derived by applying
+    a fixed 5-significant-figure rule (matching Hyperliquid's convention — the same rule
+    `pine-strategy.js`'s slippage calculation uses) to whatever price is currently in view. A host
+    can override this per symbol via `setMintickResolver((symbol) => number | null | undefined)` —
+    `symbol` is this chart's own `syminfo.ticker`/`tickerid` normally, or the exact string a script
+    passed as `request.security()`'s `symbol` argument while evaluating that call's expression for
+    a different symbol (see `PineInterpreter.activeSecuritySymbol`, set by
+    `buildSecuritySeries`/`buildLowerTfArraySeries`). Returning a nullish value (or never
+    registering a resolver at all) falls back to the heuristic.
   - `syminfo.ticker`/`tickerid`/`prefix`/`basecurrency`/`description` are derived from
-    `PineHost.coin`/`isSpot` (see `pine-host.js`) — `ticker` comes out as e.g. `"BTCUSD.P"`
-    (`"BTCUSD"` for spot), `tickerid` as `"HYPERLIQUID:BTCUSD.P"` (the `"HYPERLIQUID:"` prefix is
-    currently hardcoded, not host-configurable), `prefix` is always `"HYPERLIQUID"`.
+    `PineHost.coin`/`isSpot`/`exchangePrefix` (see `pine-host.js`, set via `setSymbol()`) —
+    `ticker` comes out as e.g. `"BTCUSD.P"` (`"BTCUSD"` for spot), `prefix` is whatever
+    `exchangePrefix` was set to (empty by default), and `tickerid` is `exchangePrefix + ":" +
+    ticker` (or just `ticker`, with no colon, if `exchangePrefix` was never set).
   - `currency` is always `"USD"`, `type` is always `"crypto"`, `timezone` is always `"Etc/UTC"`,
     `pointvalue` is always `1`.
   - Any other `syminfo.*` name just returns its own name as a string, as before.
@@ -388,14 +393,19 @@ Pine의 핵심 모델은 "스크립트 전체가 매 bar마다 처음부터 다�
 
 - **`syminfo.*`** — 호스트가 실제로 알려준 만큼은(`PineHost`/`setSymbol()` 경유) 진짜 값을 주고,
   그 외는 자기 이름 문자열로 폴백한다.
-  - `syminfo.mintick`/`minmove`/`pricescale` — 고정된 유효숫자 5자리 규칙(하이퍼리퀴드의 관례와
-    일치 — `pine-strategy.js`의 슬리피지 계산과 같은 규칙)을 현재 봉 종가에 적용해서 구한 근사
-    틱이다. 호스트별로 설정 가능한 값이 아니라 고정 휴리스틱이고, 심볼별 틱 사이즈 메타데이터는
-    반영하지 않는다(실제 거래소의 진짜 최소 틱은 이 근사치와 다를 수 있음).
-  - `syminfo.ticker`/`tickerid`/`prefix`/`basecurrency`/`description`은 `PineHost.coin`/`isSpot`
-    (`pine-host.js` 참고)에서 만들어진다 — `ticker`는 `"BTCUSD.P"`(현물이면 `"BTCUSD"`),
-    `tickerid`는 `"HYPERLIQUID:BTCUSD.P"`(`"HYPERLIQUID:"` 접두사는 현재 하드코딩돼 있고 호스트가
-    바꿀 수 없다), `prefix`는 항상 `"HYPERLIQUID"`.
+  - `syminfo.mintick`/`minmove`/`pricescale` — 기본적으로는 고정된 유효숫자 5자리 규칙
+    (하이퍼리퀴드의 관례와 일치 — `pine-strategy.js`의 슬리피지 계산과 같은 규칙)을 지금 보이는
+    가격에 적용해서 구한 근사 틱이다. 호스트가 `setMintickResolver((symbol) => number | null |
+    undefined)`로 심볼별로 이 값을 대체할 수 있다 — `symbol`은 평소엔 이 차트 자신의
+    `syminfo.ticker`/`tickerid`이고, `request.security()`가 다른 심볼의 식을 평가하는 동안엔
+    스크립트가 그 호출의 `symbol` 인자로 넘긴 문자열 그대로다(`PineInterpreter.activeSecuritySymbol`
+    참고 — `buildSecuritySeries`/`buildLowerTfArraySeries`가 설정함). `null`/`undefined`를
+    돌려주거나(아예 리졸버를 등록 안 하거나) 하면 위 휴리스틱으로 폴백한다.
+  - `syminfo.ticker`/`tickerid`/`prefix`/`basecurrency`/`description`은 `PineHost.coin`/`isSpot`/
+    `exchangePrefix`(`pine-host.js` 참고, `setSymbol()`로 설정)에서 만들어진다 — `ticker`는
+    `"BTCUSD.P"`(현물이면 `"BTCUSD"`), `prefix`는 `exchangePrefix`로 설정한 값 그대로(기본은
+    빈 문자열), `tickerid`는 `exchangePrefix + ":" + ticker`(`exchangePrefix`를 한 번도 안
+    정했으면 콜론 없이 그냥 `ticker`).
   - `currency`는 항상 `"USD"`, `type`은 항상 `"crypto"`, `timezone`은 항상 `"Etc/UTC"`,
     `pointvalue`는 항상 `1`.
   - 그 외 `syminfo.*` 이름은 예전처럼 자기 이름 문자열이 나온다.
